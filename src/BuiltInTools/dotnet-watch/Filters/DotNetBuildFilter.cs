@@ -16,6 +16,11 @@ namespace Microsoft.DotNet.Watcher.Tools
         private readonly ProcessRunner _processRunner;
         private readonly IReporter _reporter;
 
+        private static readonly string[] _projectFileExtensions = new[]
+        {
+            ".csproj",".fsproj", ".vbproj"
+        };
+
         public DotNetBuildFilter(IFileSetFactory fileSetFactory, ProcessRunner processRunner, IReporter reporter)
         {
             _fileSetFactory = fileSetFactory;
@@ -23,11 +28,21 @@ namespace Microsoft.DotNet.Watcher.Tools
             _reporter = reporter;
         }
 
+        private bool IsProjectFileExtension(string fileName)
+        {
+            var extension = System.IO.Path.GetExtension(fileName);
+            //TODO: probably want to leverage the optimized MSBuildEvaluationFilter.IsMsBuildFileExtension before releasing
+            return System.Linq.Enumerable.Contains(_projectFileExtensions, extension, StringComparer.OrdinalIgnoreCase);
+        }
+
         public async ValueTask ProcessAsync(DotNetWatchContext context, CancellationToken cancellationToken)
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                var arguments = context.Iteration == 0 || (context.ChangedFile?.FilePath is string changedFile && changedFile.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) ?
+                var shouldRestoreProject = 
+                    context.Iteration == 0 
+                    || (context.ChangedFile?.FilePath is string changedFile && IsProjectFileExtension(changedFile));
+                var arguments =  shouldRestoreProject ?
                    new[] { "msbuild", "/t:Build", "/restore", "/nologo" } :
                    new[] { "msbuild", "/t:Build", "/nologo" };
 
