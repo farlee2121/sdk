@@ -197,7 +197,7 @@ namespace Microsoft.DotNet.Watcher
                     {
                         // Now wait for a file to change before restarting process
                         _reporter.Warn("Waiting for a file to change before restarting dotnet...");
-                        await fileSetWatcher.GetChangedFileAsync(cancellationToken);
+                        await fileSetWatcher.GetChangedFileAsync(cancellationToken, forceWaitForNewUpdate: true);
                     }
                     else
                     {
@@ -263,6 +263,11 @@ namespace Microsoft.DotNet.Watcher
                     // For cshtml files, runtime compilation can opt out of watching cshtml files.
                     // Obviously this does not work if a user explicitly removed files out of the watch list,
                     // but we could wait for someone to report it before we think about ways to address it.
+                    return file;
+                }
+
+                if (filePath.EndsWith(".razor.css", StringComparison.Ordinal) || filePath.EndsWith(".cshtml.css", StringComparison.Ordinal))
+                {
                     return file;
                 }
             }
