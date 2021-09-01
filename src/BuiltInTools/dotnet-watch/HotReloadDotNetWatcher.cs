@@ -148,6 +148,7 @@ namespace Microsoft.DotNet.Watcher
                             {
                                 _reporter.Output($"Files changed: {string.Join(", ", fileItems.Select(f => f.FilePath))}");
                             }
+
                             var start = Stopwatch.GetTimestamp();
                             if (await hotReload.TryHandleFileChange(context, fileItems, combinedCancellationSource.Token))
                             {
@@ -161,6 +162,7 @@ namespace Microsoft.DotNet.Watcher
 
                                 break;
                             }
+
                         }
                     }
 
@@ -209,6 +211,17 @@ namespace Microsoft.DotNet.Watcher
             }
         }
 
+        private static readonly string[] _compiledFileExtensions = new[]
+        {
+            ".cs",".razor", ".fs"
+        };
+        private static bool IsCompiledFileExtension(string fileName)
+        {
+            var extension = System.IO.Path.GetExtension(fileName);
+            //TODO: probably want to leverage the optimized MSBuildEvaluationFilter.IsMsBuildFileExtension before releasing
+            return System.Linq.Enumerable.Contains(_compiledFileExtensions, extension, StringComparer.Ordinal);
+        }
+
         private static FileItem? MayRequireRecompilation(DotNetWatchContext context, FileItem[] fileInfo)
         {
             // This method is invoked when a new file is added to the workspace. To determine if we need to
@@ -228,7 +241,7 @@ namespace Microsoft.DotNet.Watcher
                     continue;
                 }
 
-                if (filePath.EndsWith(".cs", StringComparison.Ordinal) || filePath.EndsWith(".razor", StringComparison.Ordinal))
+                if (IsCompiledFileExtension(filePath))
                 {
                     return file;
                 }

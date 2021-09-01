@@ -20,6 +20,12 @@ namespace Microsoft.DotNet.Watcher.Tools
         {
             ".csproj",".fsproj", ".vbproj"
         };
+        private bool IsProjectFileExtension(string fileName)
+        {
+            var extension = System.IO.Path.GetExtension(fileName);
+            //TODO: probably want to leverage the optimized MSBuildEvaluationFilter.IsMsBuildFileExtension before releasing
+            return System.Linq.Enumerable.Contains(_projectFileExtensions, extension, StringComparer.OrdinalIgnoreCase);
+        }
 
         public DotNetBuildFilter(IFileSetFactory fileSetFactory, ProcessRunner processRunner, IReporter reporter)
         {
@@ -28,12 +34,6 @@ namespace Microsoft.DotNet.Watcher.Tools
             _reporter = reporter;
         }
 
-        private bool IsProjectFileExtension(string fileName)
-        {
-            var extension = System.IO.Path.GetExtension(fileName);
-            //TODO: probably want to leverage the optimized MSBuildEvaluationFilter.IsMsBuildFileExtension before releasing
-            return System.Linq.Enumerable.Contains(_projectFileExtensions, extension, StringComparer.OrdinalIgnoreCase);
-        }
 
         public async ValueTask ProcessAsync(DotNetWatchContext context, CancellationToken cancellationToken)
         {
