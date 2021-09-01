@@ -106,7 +106,9 @@ namespace Microsoft.DotNet.Watcher
                 try
                 {
                     using var hotReload = new HotReload(_processRunner, _reporter);
-                    await hotReload.InitializeAsync(context, cancellationToken);
+                    if (!context.FileSet.Project.ProjectPath.EndsWith(".fsproj")){
+                        await hotReload.InitializeAsync(context, cancellationToken);
+                    }
 
                     var processTask = _processRunner.RunAsync(processSpec, combinedCancellationSource.Token);
                     var args = string.Join(" ", processSpec.Arguments);
@@ -140,28 +142,36 @@ namespace Microsoft.DotNet.Watcher
                                 continue;
                             }
 
-                            if (fileItems.Length == 1)
-                            {
-                                _reporter.Output($"File changed: {fileItems[0].FilePath}.");
-                            }
-                            else
-                            {
-                                _reporter.Output($"Files changed: {string.Join(", ", fileItems.Select(f => f.FilePath))}");
-                            }
 
-                            var start = Stopwatch.GetTimestamp();
-                            if (await hotReload.TryHandleFileChange(context, fileItems, combinedCancellationSource.Token))
+                            if (fileItems.Any(fi => fi.FilePath.EndsWith(".fs")))
                             {
-                                var totalTime = TimeSpan.FromTicks(Stopwatch.GetTimestamp() - start);
-                                _reporter.Verbose($"Hot reload change handled in {totalTime.TotalMilliseconds}ms.");
-                            }
-                            else
-                            {
-                                _reporter.Output($"Unable to handle changes using hot reload.");
-                                await _rudeEditDialog.EvaluateAsync(combinedCancellationSource.Token);
-
                                 break;
                             }
+                            else
+                            {
+                                if (fileItems.Length == 1)
+                                {
+                                    _reporter.Output($"File changed: {fileItems[0].FilePath}.");
+                                }
+                                else
+                                {
+                                    _reporter.Output($"Files changed: {string.Join(", ", fileItems.Select(f => f.FilePath))}");
+                                }
+
+                                var start = Stopwatch.GetTimestamp();
+                                if (await hotReload.TryHandleFileChange(context, fileItems, combinedCancellationSource.Token))
+                                {
+                                    var totalTime = TimeSpan.FromTicks(Stopwatch.GetTimestamp() - start);
+                                    _reporter.Verbose($"Hot reload change handled in {totalTime.TotalMilliseconds}ms.");
+                                }
+                                else
+                                {
+                                    _reporter.Output($"Unable to handle changes using hot reload.");
+                                    await _rudeEditDialog.EvaluateAsync(combinedCancellationSource.Token);
+
+                                    break;
+                                }
+                            }  
 
                         }
                     }
