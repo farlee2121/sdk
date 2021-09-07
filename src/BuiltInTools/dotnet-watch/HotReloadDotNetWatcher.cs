@@ -106,9 +106,7 @@ namespace Microsoft.DotNet.Watcher
                 try
                 {
                     using var hotReload = new HotReload(_processRunner, _reporter);
-                    if (!context.FileSet.Project.ProjectPath.EndsWith(".fsproj")){
-                        await hotReload.InitializeAsync(context, cancellationToken);
-                    }
+                    await hotReload.InitializeAsync(context, cancellationToken);
 
                     var processTask = _processRunner.RunAsync(processSpec, combinedCancellationSource.Token);
                     var args = string.Join(" ", processSpec.Arguments);
@@ -143,35 +141,28 @@ namespace Microsoft.DotNet.Watcher
                             }
 
 
-                            if (fileItems.Any(fi => fi.FilePath.EndsWith(".fs")))
+                            if (fileItems.Length == 1)
                             {
-                                break;
+                                _reporter.Output($"File changed: {fileItems[0].FilePath}.");
                             }
                             else
                             {
-                                if (fileItems.Length == 1)
-                                {
-                                    _reporter.Output($"File changed: {fileItems[0].FilePath}.");
-                                }
-                                else
-                                {
-                                    _reporter.Output($"Files changed: {string.Join(", ", fileItems.Select(f => f.FilePath))}");
-                                }
+                                _reporter.Output($"Files changed: {string.Join(", ", fileItems.Select(f => f.FilePath))}");
+                            }
 
-                                var start = Stopwatch.GetTimestamp();
-                                if (await hotReload.TryHandleFileChange(context, fileItems, combinedCancellationSource.Token))
-                                {
-                                    var totalTime = TimeSpan.FromTicks(Stopwatch.GetTimestamp() - start);
-                                    _reporter.Verbose($"Hot reload change handled in {totalTime.TotalMilliseconds}ms.");
-                                }
-                                else
-                                {
-                                    _reporter.Output($"Unable to handle changes using hot reload.");
-                                    await _rudeEditDialog.EvaluateAsync(combinedCancellationSource.Token);
+                            var start = Stopwatch.GetTimestamp();
+                            if (await hotReload.TryHandleFileChange(context, fileItems, combinedCancellationSource.Token))
+                            {
+                                var totalTime = TimeSpan.FromTicks(Stopwatch.GetTimestamp() - start);
+                                _reporter.Verbose($"Hot reload change handled in {totalTime.TotalMilliseconds}ms.");
+                            }
+                            else
+                            {
+                                _reporter.Output($"Unable to handle changes using hot reload.");
+                                await _rudeEditDialog.EvaluateAsync(combinedCancellationSource.Token);
 
-                                    break;
-                                }
-                            }  
+                                break;
+                            }
 
                         }
                     }
@@ -228,7 +219,7 @@ namespace Microsoft.DotNet.Watcher
         private static bool IsCompiledFileExtension(string fileName)
         {
             var extension = System.IO.Path.GetExtension(fileName);
-            //TODO: probably want to leverage the optimized MSBuildEvaluationFilter.IsMsBuildFileExtension before releasing
+            //TODO: probably want to leverage the optimized version like MSBuildEvaluationFilter.IsMsBuildFileExtension before releasing
             return System.Linq.Enumerable.Contains(_compiledFileExtensions, extension, StringComparer.Ordinal);
         }
 
