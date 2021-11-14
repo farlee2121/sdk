@@ -82,6 +82,7 @@ namespace Microsoft.DotNet.Watcher.Tools
         public void Dispose()
         {
             _compilationHandler.Dispose();
+            _fSharpCompilationHandler.Dispose();
         }
     }
 }
