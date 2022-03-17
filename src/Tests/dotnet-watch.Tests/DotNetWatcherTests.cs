@@ -1,4 +1,4 @@
-// Copyright (c) .NET Foundation. All rights reserved.
+﻿// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -82,7 +82,7 @@ namespace Microsoft.DotNet.Watcher.Tools
 
             await app.StartWatcherAsync(arguments: new[] { "wait" });
             var source = Path.Combine(app.SourceDirectory, "Program.cs");
-            const string messagePrefix = "watch : Running dotnet with the following arguments: run";
+            const string messagePrefix = "dotnet watch ⌚ Running dotnet with the following arguments: run";
 
             // Verify that the first run does not use --no-restore
             Assert.Contains(app.Process.Output, p => string.Equals(messagePrefix + " -- wait", p.Trim()));
@@ -111,7 +111,7 @@ namespace Microsoft.DotNet.Watcher.Tools
 
             await app.StartWatcherAsync(arguments: new[] { "wait" });
             var source = Path.Combine(app.SourceDirectory, "KitchenSink.csproj");
-            const string messagePrefix = "watch : Running dotnet with the following arguments: run";
+            const string messagePrefix = "dotnet watch ⌚ Running dotnet with the following arguments: run";
 
             // Verify that the first run does not use --no-restore
             Assert.Contains(app.Process.Output, p => string.Equals(messagePrefix + " -- wait", p.Trim()));
@@ -128,6 +128,72 @@ namespace Microsoft.DotNet.Watcher.Tools
             File.SetLastWriteTime(Path.Combine(app.SourceDirectory, "Program.cs"), DateTime.Now);
             message = await app.Process.GetOutputLineStartsWithAsync(messagePrefix, TimeSpan.FromMinutes(2));
             Assert.Equal(messagePrefix + " --no-restore -- wait", message.Trim());
+        }
+
+        [CoreMSBuildOnlyFact]
+        public async Task Run_WithHotReloadEnabled_ReadsLaunchSettings()
+        {
+            var testAsset = _testAssetsManager.CopyTestAsset("WatchAppWithLaunchSettings")
+                .WithSource()
+                .Path;
+
+            using var app = new WatchableApp(testAsset, _logger);
+
+            app.DotnetWatchArgs.Add("--verbose");
+
+            await app.StartWatcherAsync();
+
+            await app.Process.GetOutputLineAsyncWithConsoleHistoryAsync("Environment: Development", TimeSpan.FromSeconds(10));
+        }
+
+        [CoreMSBuildOnlyFact]
+        public async Task Run_WithHotReloadEnabled_ReadsLaunchSettings_WhenUsingProjectOption()
+        {
+            var testAsset = _testAssetsManager.CopyTestAsset("WatchAppWithLaunchSettings")
+                .WithSource()
+                .Path;
+
+            var directoryInfo = new DirectoryInfo(testAsset);
+            using var app = new WatchableApp(testAsset, _logger)
+            {
+                // Configure the working directory to be one level above the test app directory.
+                WorkingDirectory = Path.GetFullPath(directoryInfo.Parent.FullName),
+            };
+
+            app.DotnetWatchArgs.Add("--verbose");
+            app.DotnetWatchArgs.Add("--project");
+            app.DotnetWatchArgs.Add(Path.Combine(directoryInfo.Name, "WatchAppWithLaunchSettings.csproj"));
+
+            await app.StartWatcherAsync();
+
+            await app.Process.GetOutputLineAsyncWithConsoleHistoryAsync("Environment: Development", TimeSpan.FromSeconds(10));
+        }
+
+        [CoreMSBuildOnlyFact]
+        public async Task Run_WithHotReloadEnabled_DoesNotReadConsoleIn_InNonInteractiveMode()
+        {
+            var testAsset = _testAssetsManager.CopyTestAsset("WatchAppWithLaunchSettings")
+                .WithSource()
+                .Path;
+
+            using var app = new WatchableApp(testAsset, _logger)
+            {
+                EnvironmentVariables =
+                {
+                    ["READ_INPUT"] = "true",
+                },
+            };
+
+            app.DotnetWatchArgs.Add("--verbose");
+            app.DotnetWatchArgs.Add("--non-interactive");
+
+            await app.StartWatcherAsync();
+
+            var standardInput = app.Process.Process.StandardInput;
+            var inputString = "This is a test input";
+
+            await standardInput.WriteLineAsync(inputString).WaitAsync(TimeSpan.FromSeconds(10));
+            await app.Process.GetOutputLineAsync($"Echo: {inputString}", TimeSpan.FromSeconds(10));
         }
     }
 }

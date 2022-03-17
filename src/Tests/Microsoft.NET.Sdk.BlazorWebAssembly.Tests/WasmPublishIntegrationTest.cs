@@ -3,26 +3,22 @@
 
 using System.IO;
 using System.IO.Compression;
-using System.Text.Json;
 using System.Linq;
-using System.Threading.Tasks;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
+using System.Text.Json;
 using System.Xml.Linq;
-using Microsoft.NET.Sdk.BlazorWebAssembly;
 using Microsoft.NET.TestFramework;
 using Microsoft.NET.TestFramework.Assertions;
 using Microsoft.NET.TestFramework.Commands;
-using Microsoft.NET.TestFramework.Utilities;
 using FluentAssertions;
 using Xunit;
 using Xunit.Abstractions;
 using static Microsoft.NET.Sdk.BlazorWebAssembly.Tests.ServiceWorkerAssert;
-using ResourceHashesByNameDictionary = System.Collections.Generic.Dictionary<string, string>;
 
 namespace Microsoft.NET.Sdk.BlazorWebAssembly.Tests
 {
-    public class WasmPublishIntegrationTest : AspNetSdkTest
+    public class WasmPublishIntegrationTest : WasmPublishIntegrationTestBase
     {
         public WasmPublishIntegrationTest(ITestOutputHelper log) : base(log) { }
 
@@ -123,7 +119,7 @@ namespace Microsoft.NET.Sdk.BlazorWebAssembly.Tests
                     reference.Name = "Reference";
                     reference.Add(new XElement(
                         "HintPath",
-                        Path.Combine("..", "razorclasslibrary", "bin", "Debug", "net6.0", "RazorClassLibrary.dll")));
+                        Path.Combine("..", "razorclasslibrary", "bin", "Debug", DefaultTfm, "RazorClassLibrary.dll")));
                 }
             });
 
@@ -225,7 +221,7 @@ namespace Microsoft.NET.Sdk.BlazorWebAssembly.Tests
             };
 
             publishDirectory.Should().HaveFiles(expectedFiles);
-            
+
             new FileInfo(Path.Combine(blazorPublishDirectory, "css", "app.css")).Should().Contain(".publish");
         }
 
@@ -698,7 +694,7 @@ namespace Microsoft.NET.Sdk.BlazorWebAssembly.Tests
             bootJsonData.Should().Contain("\"fr\\/Microsoft.CodeAnalysis.CSharp.resources.dll\"");
         }
 
-        [Fact]
+        [Fact(Skip = "https://github.com/dotnet/aspnetcore/issues/39289")]
         // Regression test for https://github.com/dotnet/aspnetcore/issues/18752
         public void Publish_HostedApp_WithoutTrimming_Works()
         {
@@ -1280,42 +1276,57 @@ namespace Microsoft.NET.Sdk.BlazorWebAssembly.Tests
             new FileInfo(Path.Combine(secondAppPublishDirectory, "_framework", "Newtonsoft.Json.dll.br")).Should().NotExist();
         }
 
-        private static void VerifyBootManifestHashes(TestAsset testAsset, string blazorPublishDirectory)
+        [Fact]
+        public void Publish_WithTransitiveReference_Works()
         {
-            var bootManifestResolvedPath = Path.Combine(blazorPublishDirectory, "_framework", "blazor.boot.json");
-            var bootManifestJson = File.ReadAllText(bootManifestResolvedPath);
-            var bootManifest = JsonSerializer.Deserialize<BootJsonData>(bootManifestJson);
+            // Regression test for https://github.com/dotnet/aspnetcore/issues/37574.
+            var testInstance = CreateAspNetSdkTestAsset("BlazorWasmWithLibrary");
 
-            VerifyBootManifestHashes(testAsset, blazorPublishDirectory, bootManifest.resources.assembly);
-            VerifyBootManifestHashes(testAsset, blazorPublishDirectory, bootManifest.resources.runtime);
+            var buildCommand = new BuildCommand(testInstance, "classlibrarywithsatelliteassemblies");
+            buildCommand.Execute().Should().Pass();
+            var referenceAssemblyPath = new FileInfo(Path.Combine(
+                buildCommand.GetOutputDirectory(DefaultTfm).ToString(),
+                "classlibrarywithsatelliteassemblies.dll"));
 
-            if (bootManifest.resources.pdb != null)
+            referenceAssemblyPath.Should().Exist();
+
+            testInstance.WithProjectChanges((path, project) =>
             {
-                VerifyBootManifestHashes(testAsset, blazorPublishDirectory, bootManifest.resources.pdb);
-            }
-
-            if (bootManifest.resources.satelliteResources != null)
-            {
-                foreach (var resourcesForCulture in bootManifest.resources.satelliteResources.Values)
+                if (path.Contains("razorclasslibrary"))
                 {
-                    VerifyBootManifestHashes(testAsset, blazorPublishDirectory, resourcesForCulture);
-                }
-            }
+                    var ns = project.Root.Name.Namespace;
+                    // <ItemGroup>
+                    //  <Reference Include="classlibrarywithsatelliteassemblies" HintPath="$Path\classlibrarywithsatelliteassemblies.dll" />
+                    // </ItemGroup>
+                    var itemGroup = new XElement(ns + "ItemGroup",
+                        new XElement(ns + "Reference",
+                            new XAttribute("Include", "classlibrarywithsatelliteassemblies"),
+                            new XAttribute("HintPath", referenceAssemblyPath)));
 
-            static void VerifyBootManifestHashes(TestAsset testAsset, string blazorPublishDirectory, ResourceHashesByNameDictionary resources)
-            {
-                foreach (var (name, hash) in resources)
-                {
-                    var relativePath = Path.Combine(blazorPublishDirectory, "_framework", name);
-                    new FileInfo(Path.Combine(testAsset.TestRoot, relativePath)).Should().HashEquals(ParseWebFormattedHash(hash));
+                    project.Root.Add(itemGroup);
                 }
-            }
+            });
 
-            static string ParseWebFormattedHash(string webFormattedHash)
-            {
-                Assert.StartsWith("sha256-", webFormattedHash);
-                return webFormattedHash.Substring(7);
-            }
+            // Ensure a compile time reference exists between the project and the assembly added as a reference. This is required for
+            // the assembly to be resolved by the "app" as part of RAR
+            File.WriteAllText(Path.Combine(testInstance.Path, "razorclasslibrary", "TestReference.cs"),
+@"
+public class TestReference
+{
+    public void Method() => System.GC.KeepAlive(typeof(classlibrarywithsatelliteassemblies.Class1));
+}");
+
+            var publishCommand = new PublishCommand(testInstance, "blazorwasm");
+            publishCommand.Execute().Should().Pass();
+
+            // Assert
+            var outputDirectory = publishCommand.GetOutputDirectory(DefaultTfm).ToString();
+            var fileInWwwroot = new FileInfo(Path.Combine(outputDirectory, "wwwroot", "_framework", "classlibrarywithsatelliteassemblies.dll"));
+            fileInWwwroot.Should().Exist();
+
+            // Make sure it's a the correct copy.
+            fileInWwwroot.Length.Should().Be(referenceAssemblyPath.Length);
+            Assert.Equal(File.ReadAllBytes(referenceAssemblyPath.FullName), File.ReadAllBytes(fileInWwwroot.FullName));
         }
 
         private void VerifyTypeGranularTrimming(string blazorPublishDirectory)

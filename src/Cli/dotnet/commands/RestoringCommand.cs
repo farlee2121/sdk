@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.DotNet.Configurer;
 using Microsoft.DotNet.Tools.MSBuild;
 using Microsoft.DotNet.Tools.Restore;
 using Microsoft.DotNet.Workloads.Workload.Install;
@@ -15,14 +16,20 @@ namespace Microsoft.DotNet.Tools
     {
         public RestoreCommand SeparateRestoreCommand { get; }
 
+        private bool AdvertiseWorkloadUpdates;
+
         public RestoringCommand(
             IEnumerable<string> msbuildArgs,
             bool noRestore,
-            string msbuildPath = null)
+            string msbuildPath = null,
+            string userProfileDir = null,
+            bool advertiseWorkloadUpdates = true)
             : base(GetCommandArguments(msbuildArgs, noRestore), msbuildPath)
         {
-            Task.Run(() => WorkloadManifestUpdater.BackgroundUpdateAdvertisingManifestsAsync());
+            userProfileDir = CliFolderPathCalculator.DotnetUserProfileFolderPath;
+            Task.Run(() => WorkloadManifestUpdater.BackgroundUpdateAdvertisingManifestsAsync(userProfileDir));
             SeparateRestoreCommand = GetSeparateRestoreCommand(msbuildArgs, noRestore, msbuildPath);
+            AdvertiseWorkloadUpdates = advertiseWorkloadUpdates;
         }
 
         private static IEnumerable<string> GetCommandArguments(
@@ -95,7 +102,10 @@ namespace Microsoft.DotNet.Tools
             }
 
             exitCode = base.Execute();
-            WorkloadManifestUpdater.AdvertiseWorkloadUpdates();
+            if (AdvertiseWorkloadUpdates)
+            {
+                WorkloadManifestUpdater.AdvertiseWorkloadUpdates();
+            }
             return exitCode;
         }
     }

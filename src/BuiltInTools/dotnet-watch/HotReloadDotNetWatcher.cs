@@ -1,5 +1,7 @@
-// Copyright (c) .NET Foundation. All rights reserved.
+﻿// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+#nullable enable
 
 using System;
 using System.Collections.Generic;
@@ -23,16 +25,20 @@ namespace Microsoft.DotNet.Watcher
         private readonly ProcessRunner _processRunner;
         private readonly DotNetWatchOptions _dotNetWatchOptions;
         private readonly IWatchFilter[] _filters;
-        private readonly RudeEditDialog _rudeEditDialog;
+        private readonly RudeEditDialog? _rudeEditDialog;
+        private readonly string _workingDirectory;
 
-        public HotReloadDotNetWatcher(IReporter reporter, IFileSetFactory fileSetFactory, DotNetWatchOptions dotNetWatchOptions, IConsole console)
+        public HotReloadDotNetWatcher(IReporter reporter, IRequester requester, IFileSetFactory fileSetFactory, DotNetWatchOptions dotNetWatchOptions, IConsole console, string workingDirectory)
         {
             Ensure.NotNull(reporter, nameof(reporter));
+            Ensure.NotNull(requester, nameof(requester));
+            Ensure.NotNullOrEmpty(workingDirectory, nameof(workingDirectory));
 
             _reporter = reporter;
             _processRunner = new ProcessRunner(reporter);
             _dotNetWatchOptions = dotNetWatchOptions;
             _console = console;
+            _workingDirectory = workingDirectory;
 
             _filters = new IWatchFilter[]
             {
@@ -40,27 +46,38 @@ namespace Microsoft.DotNet.Watcher
                 new LaunchBrowserFilter(dotNetWatchOptions),
                 new BrowserRefreshFilter(dotNetWatchOptions, _reporter),
             };
-            _rudeEditDialog = new(reporter, _console);
+
+            if (!dotNetWatchOptions.NonInteractive)
+            {
+                _rudeEditDialog = new(reporter, requester, _console);
+            }
         }
 
         public async Task WatchAsync(DotNetWatchContext context, CancellationToken cancellationToken)
         {
             var processSpec = context.ProcessSpec;
 
-            _reporter.Output("Hot reload enabled. For a list of supported edits, see https://aka.ms/dotnet/hot-reload. " +
-                "Press \"Ctrl + Shift + R\" to restart.");
-
             var forceReload = new CancellationTokenSource();
+            var hotReloadEnabledMessage = "Hot reload enabled. For a list of supported edits, see https://aka.ms/dotnet/hot-reload.";
 
-            _console.KeyPressed += (key) =>
+            if (!_dotNetWatchOptions.NonInteractive)
             {
-                var controlShift = ConsoleModifiers.Control | ConsoleModifiers.Shift;
-                if ((key.Modifiers & controlShift) == controlShift && key.Key == ConsoleKey.R)
+                _reporter.Output($"{hotReloadEnabledMessage}{Environment.NewLine}  {(_dotNetWatchOptions.SuppressEmojis ? string.Empty : "💡")} Press \"Ctrl + R\" to restart.", emoji: "🔥");
+
+                _console.KeyPressed += (key) =>
                 {
-                    var cancellationTokenSource = Interlocked.Exchange(ref forceReload, new CancellationTokenSource());
-                    cancellationTokenSource.Cancel();
-                }
-            };
+                    var modifiers = ConsoleModifiers.Control;
+                    if ((key.Modifiers & modifiers) == modifiers && key.Key == ConsoleKey.R)
+                    {
+                        var cancellationTokenSource = Interlocked.Exchange(ref forceReload, new CancellationTokenSource());
+                        cancellationTokenSource.Cancel();
+                    }
+                };
+            }
+            else
+            {
+                _reporter.Output(hotReloadEnabledMessage, emoji: "🔥");
+            }
 
             while (true)
             {
@@ -112,9 +129,9 @@ namespace Microsoft.DotNet.Watcher
                     var args = string.Join(" ", processSpec.Arguments);
                     _reporter.Verbose($"Running {processSpec.ShortDisplayName()} with the following arguments: {args}");
 
-                    _reporter.Output("Started");
+                    _reporter.Output("Started", emoji: "🚀");
 
-                    Task<FileItem[]> fileSetTask;
+                    Task<FileItem[]?> fileSetTask;
                     Task finishedTask;
 
                     while (true)
@@ -131,7 +148,7 @@ namespace Microsoft.DotNet.Watcher
                         {
                             if (MayRequireRecompilation(context, fileItems) is { } newFile)
                             {
-                                _reporter.Output($"New file: {newFile.FilePath}. Rebuilding the application.");
+                                _reporter.Output($"New file: {GetRelativeFilePath(newFile.FilePath)}. Rebuilding the application.");
                                 break;
                             }
                             else if (fileItems.All(f => f.IsNewFile))
@@ -140,27 +157,38 @@ namespace Microsoft.DotNet.Watcher
                                 continue;
                             }
 
+                            if (fileItems.Length > 1)
+                            {
+                                // Filter out newly added files from the list to make the reporting cleaner.
+                                // Any action we needed to take on significant newly added files is handled by MayRequiredRecompilation.
+                                fileItems = fileItems.Where(f => !f.IsNewFile).ToArray();
+                            }
 
                             if (fileItems.Length == 1)
                             {
-                                _reporter.Output($"File changed: {fileItems[0].FilePath}.");
+                                _reporter.Output($"File changed: {GetRelativeFilePath(fileItems[0].FilePath)}.");
                             }
                             else
                             {
-                                _reporter.Output($"Files changed: {string.Join(", ", fileItems.Select(f => f.FilePath))}");
+                                _reporter.Output($"Files changed: {string.Join(", ", fileItems.Select(f => GetRelativeFilePath(f.FilePath)))}");
                             }
 
                             var start = Stopwatch.GetTimestamp();
                             if (await hotReload.TryHandleFileChange(context, fileItems, combinedCancellationSource.Token))
                             {
                                 var totalTime = TimeSpan.FromTicks(Stopwatch.GetTimestamp() - start);
-                                _reporter.Verbose($"Hot reload change handled in {totalTime.TotalMilliseconds}ms.");
+                                _reporter.Verbose($"Hot reload change handled in {totalTime.TotalMilliseconds}ms.", emoji: "🔥");
                             }
                             else
                             {
-                                _reporter.Output($"Unable to handle changes using hot reload.");
-                                await _rudeEditDialog.EvaluateAsync(combinedCancellationSource.Token);
-
+                                if (_rudeEditDialog is not null)
+                                {
+                                    await _rudeEditDialog.EvaluateAsync(combinedCancellationSource.Token);
+                                }
+                                else
+                                {
+                                    _reporter.Verbose("Restarting without prompt since dotnet-watch is running in non-interactive mode.");
+                                }
                                 break;
                             }
 
@@ -187,7 +215,7 @@ namespace Microsoft.DotNet.Watcher
                     if (finishedTask == processTask)
                     {
                         // Now wait for a file to change before restarting process
-                        _reporter.Warn("Waiting for a file to change before restarting dotnet...");
+                        _reporter.Warn("Waiting for a file to change before restarting dotnet...", emoji: "⏳");
                         await fileSetWatcher.GetChangedFileAsync(cancellationToken, forceWaitForNewUpdate: true);
                     }
                     else
@@ -206,7 +234,7 @@ namespace Microsoft.DotNet.Watcher
                     if (forceReload.IsCancellationRequested)
                     {
                         _console.Clear();
-                        _reporter.Output("Restart requested.");
+                        _reporter.Output("Restart requested.", emoji: "🔄");
                     }
                 }
             }
@@ -248,7 +276,7 @@ namespace Microsoft.DotNet.Watcher
                 }
 
                 if (filePath.EndsWith(".cshtml", StringComparison.Ordinal) &&
-                    context.ProjectGraph.GraphRoots.FirstOrDefault() is { } project &&
+                    context.ProjectGraph!.GraphRoots.FirstOrDefault() is { } project &&
                     project.ProjectInstance.GetPropertyValue("AddCshtmlFilesToDotNetWatchList") is not "false")
                 {
                     // For cshtml files, runtime compilation can opt out of watching cshtml files.
@@ -300,6 +328,19 @@ namespace Microsoft.DotNet.Watcher
                     processSpec.EnvironmentVariables[entry.Key] = value;
                 }
             }
+        }
+
+        private string GetRelativeFilePath(string path)
+        {
+            var relativePath = path;
+            if (path.StartsWith(_workingDirectory, StringComparison.Ordinal) && path.Length > _workingDirectory.Length)
+            {
+                relativePath = path.Substring(_workingDirectory.Length);
+
+                return $".{(relativePath.StartsWith(Path.DirectorySeparatorChar) ? string.Empty : Path.DirectorySeparatorChar)}{relativePath}";
+            }
+
+            return relativePath;
         }
 
         public async ValueTask DisposeAsync()

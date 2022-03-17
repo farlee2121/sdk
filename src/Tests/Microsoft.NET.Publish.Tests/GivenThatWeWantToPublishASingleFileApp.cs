@@ -147,15 +147,13 @@ namespace Microsoft.NET.Publish.Tests
         }
 
         [Fact]
-        public void It_errors_when_publishing_single_file_with_win7()
+        public void It_generates_publishing_single_file_with_win7()
         {
             const string rid = "win7-x86";
             GetPublishCommand()
                 .Execute($"/p:RuntimeIdentifier={rid}", PublishSingleFile)
                 .Should()
-                .Fail()
-                .And
-                .HaveStdOutContaining(string.Format(Strings.SingleFileWin7Incompatible, rid));
+                .Pass();
         }
 
         [Fact]
@@ -296,53 +294,47 @@ namespace Microsoft.NET.Publish.Tests
         }
 
 
-        [RequiresMSBuildVersionTheory("17.0.0.32901")]
+        [RequiresMSBuildVersionTheory("17.0.0.32901", Skip = "https://github.com/dotnet/runtime/issues/60308")]
         [InlineData(true)]
         [InlineData(false)]
         public void It_supports_composite_r2r(bool extractAll)
         {
-            // the test fails once in a while on OSX, but dumps are not very informative,
-            // so enabling this for non-OSX platforms, hoping to get a better crash dump
-            // if you see this failing on Linux, please preserve the dump.
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            var projName = "SingleFileTest";
+            if (extractAll)
             {
-                var projName = "SingleFileTest";
-                if (extractAll)
-                {
-                    projName += "Extracted";
-                }
-
-                var testProject = new TestProject()
-                {
-                    Name = projName,
-                    TargetFrameworks = ToolsetInfo.CurrentTargetFramework,
-                    IsExe = true,
-                };
-
-                var testAsset = _testAssetsManager.CreateTestProject(testProject);
-                var publishCommand = new PublishCommand(testAsset);
-                var extraArgs = new List<string>() { PublishSingleFile, ReadyToRun, ReadyToRunComposite, RuntimeIdentifier };
-
-                if (extractAll)
-                {
-                    extraArgs.Add(IncludeAllContent);
-                }
-
-                publishCommand
-                    .Execute(extraArgs.ToArray())
-                    .Should()
-                    .Pass();
-
-                var publishDir = GetPublishDirectory(publishCommand, targetFramework: ToolsetInfo.CurrentTargetFramework).FullName;
-                var singleFilePath = Path.Combine(publishDir, $"{testProject.Name}{Constants.ExeSuffix}");
-
-                var command = new RunExeCommand(Log, singleFilePath);
-                command.Execute()
-                    .Should()
-                    .Pass()
-                    .And
-                    .HaveStdOutContaining("Hello World");
+                projName += "Extracted";
             }
+
+            var testProject = new TestProject()
+            {
+                Name = projName,
+                TargetFrameworks = ToolsetInfo.CurrentTargetFramework,
+                IsExe = true,
+            };
+
+            var testAsset = _testAssetsManager.CreateTestProject(testProject);
+            var publishCommand = new PublishCommand(testAsset);
+            var extraArgs = new List<string>() { PublishSingleFile, ReadyToRun, ReadyToRunComposite, RuntimeIdentifier };
+
+            if (extractAll)
+            {
+                extraArgs.Add(IncludeAllContent);
+            }
+
+            publishCommand
+                .Execute(extraArgs.ToArray())
+                .Should()
+                .Pass();
+
+            var publishDir = GetPublishDirectory(publishCommand, targetFramework: ToolsetInfo.CurrentTargetFramework).FullName;
+            var singleFilePath = Path.Combine(publishDir, $"{testProject.Name}{Constants.ExeSuffix}");
+
+            var command = new RunExeCommand(Log, singleFilePath);
+            command.Execute()
+                .Should()
+                .Pass()
+                .And
+                .HaveStdOutContaining("Hello World");
         }
 
         [RequiresMSBuildVersionFact("16.8.0")]
@@ -451,7 +443,7 @@ namespace Microsoft.NET.Publish.Tests
 
             var intermediateDirectory = publishCommand.GetIntermediateDirectory(targetFramework, runtimeIdentifier: RuntimeInformation.RuntimeIdentifier);
             var mainProjectDll = Path.Combine(intermediateDirectory.FullName, $"{TestProjectName}.dll");
-            var niPdbFile = GivenThatWeWantToPublishReadyToRun.GetPDBFileName(mainProjectDll, framework);
+            var niPdbFile = GivenThatWeWantToPublishReadyToRun.GetPDBFileName(mainProjectDll, framework, RuntimeInformation.RuntimeIdentifier);
 
             string[] expectedFiles = { SingleFile, PdbFile, niPdbFile };
             GetPublishDirectory(publishCommand)

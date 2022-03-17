@@ -353,7 +353,7 @@ public class Person
 @code
 {
     private int count;
-    
+
     public void Click() => count++;
 }
 
@@ -435,7 +435,7 @@ public class Person
 @code
 {
     private int count;
-    
+
     public void Click() => count++;
 
     [Parameter] public int IncrementAmount { get; set; }
@@ -521,9 +521,9 @@ public class Person
             Assert.Equal(2, result.GeneratedSources.Length);
 
             eventListener.Events.Clear();
-            
-            var surveryPromptAssembly = GetSurveyPromptMetadataReference(compilation!);
-            compilation = compilation!.AddReferences(surveryPromptAssembly);
+
+            var surveyPromptAssembly = GetSurveyPromptMetadataReference(compilation!);
+            compilation = compilation!.AddReferences(surveyPromptAssembly);
 
             result = RunGenerator(compilation, ref driver);
 
@@ -912,13 +912,354 @@ public class HeaderTagHelper : TagHelper
             Assert.Equal(2, result.GeneratedSources.Length);
         }
 
+        [Fact]
+        public async Task SourceGenerator_DoesNotAddAnyGeneratedSources_WhenSourceGeneratorIsSuppressed()
+        {
+            // Regression test for https://github.com/dotnet/aspnetcore/issues/36227
+            // Arrange
+            var project = CreateTestProject(new()
+            {
+                ["Pages/Index.razor"] = "<h1>Hello world</h1>",
+                ["Pages/Counter.razor"] = "<h1>Counter</h1>",
+            });
+
+            var compilation = await project.GetCompilationAsync();
+            var (driver, additionalTexts) = await GetDriverWithAdditionalTextAsync(project, optionsProvider =>
+            {
+                optionsProvider.TestGlobalOptions["build_property.SuppressRazorSourceGenerator"] = "true";
+            });
+
+            var result = RunGenerator(compilation!, ref driver);
+            Assert.Empty(result.Diagnostics);
+            Assert.Empty(result.GeneratedSources);
+
+            var updatedText = new TestAdditionalText("Pages/Index.razor", SourceText.From(@"<h1>Hello world 1</h1>", Encoding.UTF8));
+            driver = driver.ReplaceAdditionalText(additionalTexts.First(f => f.Path == updatedText.Path), updatedText);
+
+            // Now run the source generator again with updated text that should result in a cache miss
+            // and exercise comparers
+            result = RunGenerator(compilation!, ref driver);
+
+            Assert.Empty(result.Diagnostics);
+            Assert.Empty(result.GeneratedSources);
+        }
+
+        [Fact]
+        public async Task SourceGenerator_CorrectlyGeneratesSourcesOnceSuppressRazorSourceGeneratorIsUnset()
+        {
+            // Regression test for https://github.com/dotnet/aspnetcore/issues/36227
+            // Arrange
+            var project = CreateTestProject(new()
+            {
+                ["Pages/Index.razor"] = "<h1>Hello world</h1>",
+                ["Pages/Counter.razor"] =
+@"
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+<h1>Counter</h1>
+<button @onclick=""@(() => {})"">Click me</button>",
+            });
+
+            var compilation = await project.GetCompilationAsync();
+            TestAnalyzerConfigOptionsProvider? testOptionsProvider = null;
+            var (driver, additionalTexts) = await GetDriverWithAdditionalTextAsync(project, optionsProvider =>
+            {
+                testOptionsProvider = optionsProvider;
+                optionsProvider.TestGlobalOptions["build_property.SuppressRazorSourceGenerator"] = "true";
+            });
+
+            var result = RunGenerator(compilation!, ref driver);
+            Assert.Empty(result.Diagnostics);
+            Assert.Empty(result.GeneratedSources);
+            var updatedOptionsProvider = new TestAnalyzerConfigOptionsProvider();
+            foreach (var option in testOptionsProvider!.AdditionalTextOptions)
+            {
+                updatedOptionsProvider.AdditionalTextOptions[option.Key] = option.Value;
+            }
+
+            foreach (var option in testOptionsProvider!.TestGlobalOptions.Options)
+            {
+                updatedOptionsProvider.TestGlobalOptions[option.Key] = option.Value;
+            }
+
+            updatedOptionsProvider.TestGlobalOptions["build_property.SuppressRazorSourceGenerator"] = "false";
+
+            driver = driver.WithUpdatedAnalyzerConfigOptions(updatedOptionsProvider);
+            result = RunGenerator(compilation!, ref driver);
+
+            Assert.Collection(
+                result.GeneratedSources,
+                sourceResult =>
+                {
+                    Assert.Contains("public partial class Index", sourceResult.SourceText.ToString());
+                },
+                sourceResult =>
+                {
+                    var sourceText = sourceResult.SourceText.ToString();
+                    Assert.Contains("public partial class Counter", sourceText);
+                    // Regression test for https://github.com/dotnet/aspnetcore/issues/36116. Verify that @onclick is resolved as a component, and not as a regular attribute
+                    Assert.Contains("__builder.AddAttribute(2, \"onclick\", global::Microsoft.AspNetCore.Components.EventCallback.Factory.Create<global::Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this,", sourceText);
+                });
+        }
+
+        [Fact]
+        public async Task SourceGenerator_UsesPreviouslyCachedResults_IfSuppressRazorSourceGeneratorIsTrue_AndWasPreviouslyFalse()
+        {
+            // When SuppressRazorSourceGenerator=true, we can safely re-use previously cached results instead of 
+            // re-running steps and producing no-op results.
+            // Arrange
+            using var eventListener = new RazorEventListener();
+            var project = CreateTestProject(new()
+            {
+                ["Pages/Index.razor"] = "<h1>Hello world</h1>",
+                ["Pages/Counter.razor"] =
+@"
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+<h1>Counter</h1>
+<button @onclick=""@(() => {})"">Click me</button>",
+            });
+
+            var compilation = await project.GetCompilationAsync();
+            TestAnalyzerConfigOptionsProvider? testOptionsProvider = null;
+            var (driver, additionalTexts) = await GetDriverWithAdditionalTextAsync(project, optionsProvider =>
+            {
+                testOptionsProvider = optionsProvider;
+                optionsProvider.TestGlobalOptions["build_property.SuppressRazorSourceGenerator"] = "false";
+            });
+
+            var result = RunGenerator(compilation!, ref driver);
+            Assert.Empty(result.Diagnostics);
+            Assert.Collection(
+                result.GeneratedSources,
+                sourceResult =>
+                {
+                    Assert.Contains("public partial class Index", sourceResult.SourceText.ToString());
+                },
+                sourceResult =>
+                {
+                    var sourceText = sourceResult.SourceText.ToString();
+                    Assert.Contains("public partial class Counter", sourceText);
+                    Assert.Contains("__builder.AddAttribute(2, \"onclick\", global::Microsoft.AspNetCore.Components.EventCallback.Factory.Create<global::Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this,", sourceText);
+                });
+
+            var updatedOptionsProvider = new TestAnalyzerConfigOptionsProvider();
+            foreach (var option in testOptionsProvider!.AdditionalTextOptions)
+            {
+                updatedOptionsProvider.AdditionalTextOptions[option.Key] = option.Value;
+            }
+
+            foreach (var option in testOptionsProvider!.TestGlobalOptions.Options)
+            {
+                updatedOptionsProvider.TestGlobalOptions[option.Key] = option.Value;
+            }
+
+            updatedOptionsProvider.TestGlobalOptions["build_property.SuppressRazorSourceGenerator"] = "true";
+
+            driver = driver.WithUpdatedAnalyzerConfigOptions(updatedOptionsProvider);
+            eventListener.Events.Clear();
+            result = RunGenerator(compilation!, ref driver);
+
+            Assert.Empty(result.GeneratedSources);
+            Assert.Collection(eventListener.Events,
+                e => Assert.Equal("ComputeRazorSourceGeneratorOptions", e.EventName));
+        }
+
+        [Fact]
+        public async Task SourceGenerator_UsesPreviouslyCachedResults_IfSuppressRazorSourceGeneratorIsTrue_AndWasPreviouslyTrue()
+        {
+            // When SuppressRazorSourceGenerator=true, we can safely re-use previously cached results instead of
+            // re-running steps and producing no-op results.
+            // Arrange
+            using var eventListener = new RazorEventListener();
+            var project = CreateTestProject(new()
+            {
+                ["Pages/Index.razor"] = "<h1>Hello world</h1>",
+                ["Pages/Counter.razor"] =
+@"
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+<h1>Counter</h1>
+<button @onclick=""@(() => {})"">Click me</button>",
+            });
+
+            var compilation = await project.GetCompilationAsync();
+            TestAnalyzerConfigOptionsProvider? testOptionsProvider = null;
+            var (driver, additionalTexts) = await GetDriverWithAdditionalTextAsync(project, optionsProvider =>
+            {
+                testOptionsProvider = optionsProvider;
+                optionsProvider.TestGlobalOptions["build_property.SuppressRazorSourceGenerator"] = "true";
+            });
+
+            var result = RunGenerator(compilation!, ref driver);
+            Assert.Empty(result.Diagnostics);
+            Assert.Empty(result.GeneratedSources);
+
+            var updatedOptionsProvider = new TestAnalyzerConfigOptionsProvider();
+            foreach (var option in testOptionsProvider!.AdditionalTextOptions)
+            {
+                updatedOptionsProvider.AdditionalTextOptions[option.Key] = option.Value;
+            }
+
+            foreach (var option in testOptionsProvider!.TestGlobalOptions.Options)
+            {
+                updatedOptionsProvider.TestGlobalOptions[option.Key] = option.Value;
+            }
+
+            updatedOptionsProvider.TestGlobalOptions["build_property.SuppressRazorSourceGenerator"] = "true";
+
+            driver = driver.WithUpdatedAnalyzerConfigOptions(updatedOptionsProvider);
+
+            eventListener.Events.Clear();
+            result = RunGenerator(compilation!, ref driver);
+
+            Assert.Empty(result.GeneratedSources);
+            Assert.Collection(eventListener.Events,
+                e => Assert.Equal("ComputeRazorSourceGeneratorOptions", e.EventName));
+        }
+
+        [Fact]
+        public async Task SourceGenerator_UsesPreviouslyCachedResults_BetweenSuppressRazorSourceGeneratorsChanges()
+        {
+            // When SuppressRazorSourceGenerator=true, we can safely re-use previously cached results instead of
+            // re-running steps and producing no-op results.
+            // This test verifies if the suppression changes from false -> true -> false, we can continue using
+            // results from previously cached results.
+            // Arrange
+            using var eventListener = new RazorEventListener();
+            var project = CreateTestProject(new()
+            {
+                ["Pages/Index.razor"] = "<h1>Hello world</h1>",
+                ["Pages/Counter.razor"] =
+@"
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+<h1>Counter</h1>
+<button @onclick=""@(() => {})"">Click me</button>",
+            });
+
+            var compilation = await project.GetCompilationAsync();
+            TestAnalyzerConfigOptionsProvider? testOptionsProvider = null;
+            var (driver, additionalTexts) = await GetDriverWithAdditionalTextAsync(project, optionsProvider =>
+            {
+                testOptionsProvider = optionsProvider;
+                optionsProvider.TestGlobalOptions["build_property.SuppressRazorSourceGenerator"] = "false";
+            });
+
+            var result = RunGenerator(compilation!, ref driver);
+            Assert.Empty(result.Diagnostics);
+            Assert.Equal(2, result.GeneratedSources.Length);
+
+            var indexText = additionalTexts.First(f => f.Path == "Pages/Index.razor");
+
+            for (var i = 0; i < 10; i++)
+            {
+                // Step 2
+                var updatedOptionsProvider = new TestAnalyzerConfigOptionsProvider();
+                foreach (var option in testOptionsProvider!.AdditionalTextOptions)
+                {
+                    updatedOptionsProvider.AdditionalTextOptions[option.Key] = option.Value;
+                }
+
+                foreach (var option in testOptionsProvider!.TestGlobalOptions.Options)
+                {
+                    updatedOptionsProvider.TestGlobalOptions[option.Key] = option.Value;
+                }
+
+                updatedOptionsProvider.TestGlobalOptions["build_property.SuppressRazorSourceGenerator"] = "true";
+
+                driver = driver.WithUpdatedAnalyzerConfigOptions(updatedOptionsProvider);
+                eventListener.Events.Clear();
+                result = RunGenerator(compilation!, ref driver);
+
+                Assert.Empty(result.GeneratedSources);
+
+                // Step 3
+                updatedOptionsProvider = new TestAnalyzerConfigOptionsProvider();
+                foreach (var option in testOptionsProvider!.AdditionalTextOptions)
+                {
+                    updatedOptionsProvider.AdditionalTextOptions[option.Key] = option.Value;
+                }
+
+                foreach (var option in testOptionsProvider!.TestGlobalOptions.Options)
+                {
+                    updatedOptionsProvider.TestGlobalOptions[option.Key] = option.Value;
+                }
+
+                updatedOptionsProvider.TestGlobalOptions["build_property.SuppressRazorSourceGenerator"] = "false";
+                driver = driver.WithUpdatedAnalyzerConfigOptions(updatedOptionsProvider);
+
+                // Simulate text change
+                var updatedText = new TestAdditionalText("Pages/Index.razor", SourceText.From($"<h1>Hello world {(i + 1)}</h1>", Encoding.UTF8));
+                driver = driver.ReplaceAdditionalText(indexText, updatedText);
+                indexText = updatedText;
+
+                eventListener.Events.Clear();
+                result = RunGenerator(compilation!, ref driver);
+
+                Assert.Collection(
+                    result.GeneratedSources,
+                    sourceResult =>
+                    {
+                        Assert.Contains($"Hello world {(i + 1)}", sourceResult.SourceText.ToString());
+                    },
+                    sourceResult =>
+                    {
+                        var sourceText = sourceResult.SourceText.ToString();
+                        Assert.Contains("public partial class Counter", sourceText);
+                        // Regression test for https://github.com/dotnet/aspnetcore/issues/36116. Verify that @onclick is resolved as a component, and not as a regular attribute
+                        Assert.Contains("__builder.AddAttribute(2, \"onclick\", global::Microsoft.AspNetCore.Components.EventCallback.Factory.Create<global::Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this,", sourceText);
+                    });
+
+                Assert.Collection(
+                    eventListener.Events,
+                    e => Assert.Equal("ComputeRazorSourceGeneratorOptions", e.EventName),
+                    e =>
+                    {
+                        Assert.Equal("GenerateDeclarationCodeStart", e.EventName);
+                        var file = Assert.Single(e.Payload);
+                        Assert.Equal("/Pages/Index.razor", file);
+                    },
+                    e =>
+                    {
+                        Assert.Equal("GenerateDeclarationCodeStop", e.EventName);
+                        var file = Assert.Single(e.Payload);
+                        Assert.Equal("/Pages/Index.razor", file);
+                    },
+                    e =>
+                    {
+                        Assert.Equal("RazorCodeGenerateStart", e.EventName);
+                        var file = Assert.Single(e.Payload);
+                        Assert.Equal("/Pages/Index.razor", file);
+                    },
+                    e =>
+                    {
+                        Assert.Equal("RazorCodeGenerateStop", e.EventName);
+                        var file = Assert.Single(e.Payload);
+                        Assert.Equal("/Pages/Index.razor", file);
+                    },
+                    e =>
+                    {
+                        Assert.Equal("AddSyntaxTrees", e.EventName);
+                        var file = Assert.Single(e.Payload);
+                        Assert.Equal("Pages_Index_razor.g.cs", file);
+                    },
+                    e =>
+                    {
+                        Assert.Equal("AddSyntaxTrees", e.EventName);
+                        var file = Assert.Single(e.Payload);
+                        Assert.Equal("Pages_Counter_razor.g.cs", file);
+                    });
+            }
+        }
+
         private static async ValueTask<GeneratorDriver> GetDriverAsync(Project project)
         {
             var (driver, _) = await GetDriverWithAdditionalTextAsync(project);
             return driver;
         }
 
-        private static async ValueTask<(GeneratorDriver, ImmutableArray<AdditionalText>)> GetDriverWithAdditionalTextAsync(Project project)
+        private static async ValueTask<(GeneratorDriver, ImmutableArray<AdditionalText>)> GetDriverWithAdditionalTextAsync(Project project, Action<TestAnalyzerConfigOptionsProvider>? configureGlobalOptions = null)
         {
             var razorSourceGenerator = new RazorSourceGenerator().AsSourceGenerator();
             var driver = (GeneratorDriver)CSharpGeneratorDriver.Create(new[] { razorSourceGenerator }, parseOptions: (CSharpParseOptions)project.ParseOptions!);
@@ -927,6 +1268,8 @@ public class HeaderTagHelper : TagHelper
             optionsProvider.TestGlobalOptions["build_property.RazorConfiguration"] = "Default";
             optionsProvider.TestGlobalOptions["build_property.RootNamespace"] = "MyApp";
             optionsProvider.TestGlobalOptions["build_property.RazorLangVersion"] = "Latest";
+
+            configureGlobalOptions?.Invoke(optionsProvider);
 
             var additionalTexts = ImmutableArray<AdditionalText>.Empty;
 
@@ -982,21 +1325,21 @@ public class HeaderTagHelper : TagHelper
 
         private class AppLocalResolver : ICompilationAssemblyResolver
         {
-            public bool TryResolveAssemblyPaths(CompilationLibrary library, List<string> assemblies)
+            public bool TryResolveAssemblyPaths(CompilationLibrary library, List<string>? assemblies)
             {
                 foreach (var assembly in library.Assemblies)
                 {
                     var dll = Path.Combine(Directory.GetCurrentDirectory(), "refs", Path.GetFileName(assembly));
                     if (File.Exists(dll))
                     {
-                        assemblies.Add(dll);
+                        assemblies!.Add(dll);
                         return true;
                     }
 
                     dll = Path.Combine(Directory.GetCurrentDirectory(), Path.GetFileName(assembly));
                     if (File.Exists(dll))
                     {
-                        assemblies.Add(dll);
+                        assemblies!.Add(dll);
                         return true;
                     }
                 }
@@ -1020,7 +1363,7 @@ public class HeaderTagHelper : TagHelper
             project = project.WithParseOptions(((CSharpParseOptions)project.ParseOptions!).WithLanguageVersion(LanguageVersion.Preview));
 
 
-            foreach (var defaultCompileLibrary in DependencyContext.Load(typeof(RazorSourceGeneratorTests).Assembly).CompileLibraries)
+            foreach (var defaultCompileLibrary in DependencyContext.Load(typeof(RazorSourceGeneratorTests).Assembly)!.CompileLibraries)
             {
                 foreach (var resolveReferencePath in defaultCompileLibrary.ResolveReferencePaths(new AppLocalResolver()))
                 {

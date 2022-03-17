@@ -169,7 +169,7 @@
     <value>Download of workload packs to offline cache failed: {0}</value>
   </data>
   <data name="WorkloadAlreadyInstalled" xml:space="preserve">
-    <value>Workload '{0}' is already installed.</value>
+    <value>Workload(s) '{0}' are already installed.</value>
   </data>
   <data name="InvalidNuGetVersionRange" xml:space="preserve">
     <value>Specified version '{0}' isn't a valid NuGet version range.</value>
@@ -286,7 +286,7 @@
     <value>Provided rollback definition file {0} doesn't exist.</value>
   </data>
   <data name="RollbackDefinitionContainsExtraneousManifestIds" xml:space="preserve">
-    <value>Invalid rollback definition. The manifest IDs in rollback definition {0} do not match installed manifest IDs.</value>
+    <value>Invalid rollback definition. The manifest IDs in rollback definition {0} do not match installed manifest IDs {1}.</value>
   </data>
   <data name="InsufficientPrivilegeToStartServer" xml:space="preserve">
     <value>Insufficient privilege to start the server.</value>
@@ -314,5 +314,11 @@
   </data>
   <data name="GarbageCollectionFailed" xml:space="preserve">
     <value>Warning: Workload garbage collection failed with error: {0}.</value>
+  </data>
+  <data name="FromCacheOptionArgumentName" xml:space="preserve">
+    <value>DIRECTORY</value>
+  </data>
+  <data name="DownloadToCacheOptionArgumentName" xml:space="preserve">
+    <value>DIRECTORY</value>
   </data>
 </root>

@@ -2,13 +2,13 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.DotNet.Configurer;
 using Microsoft.NET.Sdk.Razor.Tool.CommandLineUtils;
 
 namespace Microsoft.NET.Sdk.Razor.Tool
@@ -147,7 +147,7 @@ namespace Microsoft.NET.Sdk.Razor.Tool
             // <pipename>
 
             const int DefaultBufferSize = 4096;
-            var processId = Process.GetCurrentProcess().Id;
+            var processId = Environment.ProcessId;
             var fileName = $"rzc-{processId}";
 
             // Make sure the directory exists.
@@ -172,9 +172,8 @@ namespace Microsoft.NET.Sdk.Razor.Tool
             var path = getEnvironmentVariable("DOTNET_BUILD_PIDFILE_DIRECTORY");
             if (string.IsNullOrEmpty(path))
             {
-                var homeEnvVariable = PlatformInformation.IsWindows ? "USERPROFILE" : "HOME";
-                var homePath = getEnvironmentVariable(homeEnvVariable);
-                if (string.IsNullOrEmpty(homePath))
+                var homePath = CliFolderPathCalculatorCore.GetDotnetHomePath(getEnvironmentVariable);
+                if (homePath is null)
                 {
                     // Couldn't locate the user profile directory. Bail.
                     return null;

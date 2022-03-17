@@ -665,7 +665,7 @@ class Program
                     WorkingDirectory = testAsset.TestRoot
                 };
 
-                dotnetCommand.Execute("new", "sln")
+                dotnetCommand.Execute("new", "sln", "--debug:ephemeral-hive")
                     .Should()
                     .Pass();
 
@@ -1060,6 +1060,30 @@ namespace ProjectNameWithSpaces
                 .Fail()
                 .And
                 .HaveStdOutContaining("NETSDK1148");
+        }
+
+        [Fact]
+        public void It_Has_Unescaped_PackageConflictPreferredPackages_Values()
+        {
+            string targetFramework = ToolsetInfo.CurrentTargetFramework;
+
+            var testAsset = _testAssetsManager
+                .CopyTestAsset("AppWithLibrary", identifier: targetFramework)
+                .WithSource()
+                .WithTargetFramework(targetFramework, "TestLibrary");
+
+            var getValuesCommand = new GetValuesCommand(Log, Path.Combine(testAsset.TestRoot, "TestLibrary"), targetFramework, "PackageConflictPreferredPackages");
+            getValuesCommand
+                .Execute()
+                .Should()
+                .Pass();
+
+            List<string> preferredPackages = getValuesCommand.GetValues();
+            preferredPackages.Should().NotBeEmpty();
+            preferredPackages.Count.Should().BeGreaterThan(1);
+
+            preferredPackages.Should().NotContain(packageName => packageName.Contains(';'),
+                because: "No package name should have a semicolon in it--PackageConflictPreferredPackages should be a semicolon delimited list of package names");
         }
     }
 }

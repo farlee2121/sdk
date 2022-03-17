@@ -4,10 +4,8 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
 
@@ -49,6 +47,9 @@ namespace Microsoft.NET.Sdk.BlazorWebAssembly
 
         [Required]
         public string PublishPath { get; set; }
+
+        [Required]
+        public string DotNetJsVersion { get; set; }
 
         [Output]
         public ITaskItem[] NewCandidates { get; set; }
@@ -170,7 +171,7 @@ namespace Microsoft.NET.Sdk.BlazorWebAssembly
                             nativeStaticWebAssets.Add(newAsset);
                             filesToRemove.Add(existing);
                             updateMap.Add(asset.ItemSpec, newAsset);
-                            Log.LogMessage("Promoting asset '{0}' to Publish asset.", asset.ItemSpec);
+                            Log.LogMessage(MessageImportance.Low, "Promoting asset '{0}' to Publish asset.", asset.ItemSpec);
                         }
                         else
                         {
@@ -193,13 +194,15 @@ namespace Microsoft.NET.Sdk.BlazorWebAssembly
                     {
                         newDotNetJs = new TaskItem(Path.GetFullPath(aotDotNetJs.ItemSpec), asset.CloneCustomMetadata());
                         newDotNetJs.SetMetadata("OriginalItemSpec", aotDotNetJs.ItemSpec);
+                        newDotNetJs.SetMetadata("RelativePath", $"_framework/{$"dotnet.{DotNetJsVersion}.{FileHasher.GetFileHash(aotDotNetJs.ItemSpec)}.js"}");
+
                         updateMap.Add(asset.ItemSpec, newDotNetJs);
-                        Log.LogMessage("Replacing asset '{0}' with linked version '{1}'", asset.ItemSpec, newDotNetJs.ItemSpec);
+                        Log.LogMessage(MessageImportance.Low, "Replacing asset '{0}' with AoT version '{1}'", asset.ItemSpec, newDotNetJs.ItemSpec);
                     }
                     else
                     {
                         newDotNetJs = new TaskItem(asset);
-                        Log.LogMessage("Promoting asset '{0}' to Publish asset.", asset.ItemSpec);
+                        Log.LogMessage(MessageImportance.Low, "Promoting asset '{0}' to Publish asset.", asset.ItemSpec);
                     }
 
                     ApplyPublishProperties(newDotNetJs);
@@ -220,12 +223,12 @@ namespace Microsoft.NET.Sdk.BlazorWebAssembly
                         newDotNetWasm = new TaskItem(Path.GetFullPath(aotDotNetWasm.ItemSpec), asset.CloneCustomMetadata());
                         newDotNetWasm.SetMetadata("OriginalItemSpec", aotDotNetWasm.ItemSpec);
                         updateMap.Add(asset.ItemSpec, newDotNetWasm);
-                        Log.LogMessage("Replacing asset '{0}' with linked version '{1}'", asset.ItemSpec, newDotNetWasm.ItemSpec);
+                        Log.LogMessage(MessageImportance.Low, "Replacing asset '{0}' with AoT version '{1}'", asset.ItemSpec, newDotNetWasm.ItemSpec);
                     }
                     else
                     {
                         newDotNetWasm = new TaskItem(asset);
-                        Log.LogMessage("Promoting asset '{0}' to Publish asset.", asset.ItemSpec);
+                        Log.LogMessage(MessageImportance.Low, "Promoting asset '{0}' to Publish asset.", asset.ItemSpec);
                     }
 
                     ApplyPublishProperties(newDotNetWasm);
@@ -246,7 +249,11 @@ namespace Microsoft.NET.Sdk.BlazorWebAssembly
 
             return nativeStaticWebAssets;
 
-            static bool IsDotNetJs(string key) => string.Equals("dotnet.js", Path.GetFileName(key), StringComparison.Ordinal);
+            static bool IsDotNetJs(string key)
+            {
+                var fileName = Path.GetFileName(key);
+                return fileName.StartsWith("dotnet.", StringComparison.Ordinal) && fileName.EndsWith(".js", StringComparison.Ordinal);
+            }
 
             static bool IsDotNetWasm(string key) => string.Equals("dotnet.wasm", Path.GetFileName(key), StringComparison.Ordinal);
         }
@@ -263,7 +270,6 @@ namespace Microsoft.NET.Sdk.BlazorWebAssembly
 
             foreach (var kvp in symbolAssets)
             {
-                var key = kvp.Key;
                 var asset = kvp.Value;
                 if (resolvedSymbolAssetToPublish.TryGetValue(Path.GetFileName(asset.GetMetadata("OriginalItemSpec")), out var existing))
                 {
@@ -276,7 +282,7 @@ namespace Microsoft.NET.Sdk.BlazorWebAssembly
                         symbolStaticWebAssets.Add(newAsset);
                         updateMap.Add(newAsset.ItemSpec, newAsset);
                         filesToRemove.Add(existing);
-                        Log.LogMessage("Promoting asset '{0}' to Publish asset.", asset.ItemSpec);
+                        Log.LogMessage(MessageImportance.Low, "Promoting asset '{0}' to Publish asset.", asset.ItemSpec);
                     }
                     else
                     {
@@ -371,13 +377,13 @@ namespace Microsoft.NET.Sdk.BlazorWebAssembly
                         {
                             newAsemblyAsset = new TaskItem(linked.GetMetadata("FullPath"), asset.CloneCustomMetadata());
                             newAsemblyAsset.SetMetadata("OriginalItemSpec", linked.ItemSpec);
-                            Log.LogMessage("Replacing asset '{0}' with linked version '{1}'",
+                            Log.LogMessage(MessageImportance.Low, "Replacing asset '{0}' with linked version '{1}'",
                                 asset.ItemSpec,
                                 newAsemblyAsset.ItemSpec);
                         }
                         else
                         {
-                            Log.LogMessage("Linked asset not found for asset '{0}'", asset.ItemSpec);
+                            Log.LogMessage(MessageImportance.Low, "Linked asset not found for asset '{0}'", asset.ItemSpec);
                             newAsemblyAsset = new TaskItem(asset);
                         }
                         ApplyPublishProperties(newAsemblyAsset);
@@ -389,7 +395,7 @@ namespace Microsoft.NET.Sdk.BlazorWebAssembly
                         var dependentAsset = new TaskItem(asset);
                         ApplyPublishProperties(dependentAsset);
                         UpdateRelatedAssetProperty(asset, dependentAsset, updatedAssetsMap);
-                        Log.LogMessage("Promoting asset '{0}' to Publish asset.", asset.ItemSpec);
+                        Log.LogMessage(MessageImportance.Low, "Promoting asset '{0}' to Publish asset.", asset.ItemSpec);
 
                         updatedAssetsMap.Add(asset.ItemSpec, dependentAsset);
                         break;
@@ -414,14 +420,14 @@ namespace Microsoft.NET.Sdk.BlazorWebAssembly
                 {
                     if (!updatedAssets.ContainsKey(relatedAsset))
                     {
-                        Log.LogMessage("Related assembly for '{0}' was not updated and the compressed asset can be reused.", relatedAsset);
+                        Log.LogMessage(MessageImportance.Low, "Related assembly for '{0}' was not updated and the compressed asset can be reused.", relatedAsset);
                         var newCompressedAsset = new TaskItem(compressedAsset);
                         ApplyPublishProperties(newCompressedAsset);
                         additionalAssetsToUpdate.Add(newCompressedAsset);
                     }
                     else
                     {
-                        Log.LogMessage("Related assembly for '{0}' was updated and the compressed asset will be discarded.", relatedAsset);
+                        Log.LogMessage(MessageImportance.Low, "Related assembly for '{0}' was updated and the compressed asset will be discarded.", relatedAsset);
                     }
 
                     processed.Add(kvp.Key);
@@ -519,8 +525,15 @@ namespace Microsoft.NET.Sdk.BlazorWebAssembly
             {
                 if (ComputeBlazorBuildAssets.ShouldFilterCandidate(candidate, TimeZoneSupport, InvariantGlobalization, CopySymbols, out var reason))
                 {
-                    Log.LogMessage("Skipping asset '{0}' becasue '{1}'", candidate.ItemSpec, reason);
-                    resolvedFilesToPublishToRemove.Add(candidate.ItemSpec, candidate);
+                    Log.LogMessage(MessageImportance.Low, "Skipping asset '{0}' because '{1}'", candidate.ItemSpec, reason);
+                    if (!resolvedFilesToPublishToRemove.ContainsKey(candidate.ItemSpec))
+                    {
+                        resolvedFilesToPublishToRemove.Add(candidate.ItemSpec, candidate);
+                    }
+                    else
+                    {
+                        Log.LogMessage(MessageImportance.Low, "Duplicate candidate '{0}' found in ResolvedFilesToPublish", candidate.ItemSpec);
+                    }
                     continue;
                 }
 
@@ -533,16 +546,42 @@ namespace Microsoft.NET.Sdk.BlazorWebAssembly
                     {
                         var finalCulture = !string.IsNullOrEmpty(culture) ? culture : inferredCulture;
                         var assemblyName = Path.GetFileName(candidate.GetMetadata("RelativePath").Replace("\\", "/"));
-                        satelliteAssemblyToPublish.Add((finalCulture, assemblyName), candidate);
+                        if (!satelliteAssemblyToPublish.ContainsKey((finalCulture, assemblyName)))
+                        {
+                            satelliteAssemblyToPublish.Add((finalCulture, assemblyName), candidate);
+                        }
+                        else
+                        {
+                            Log.LogMessage(MessageImportance.Low, "Duplicate candidate '{0}' found in ResolvedFilesToPublish", candidate.ItemSpec);
+                        }
                         continue;
                     }
 
-                    resolvedAssemblyToPublish.Add(Path.GetFileName(candidate.GetMetadata("RelativePath")), candidate);
+                    var candidateName = Path.GetFileName(candidate.GetMetadata("RelativePath"));
+                    if (!resolvedAssemblyToPublish.ContainsKey(candidateName))
+                    {
+                        resolvedAssemblyToPublish.Add(candidateName, candidate);
+                    }
+                    else
+                    {
+                        Log.LogMessage(MessageImportance.Low, "Duplicate candidate '{0}' found in ResolvedFilesToPublish", candidate.ItemSpec);
+                    }
+
                     continue;
                 }
-                if (string.Equals(extension, " .pdb", StringComparison.Ordinal))
+
+                if (string.Equals(extension, ".pdb", StringComparison.Ordinal))
                 {
-                    resolvedSymbolsToPublish.Add(Path.GetFileName(candidate.GetMetadata("RelativePath")), candidate);
+                    var candidateName = Path.GetFileName(candidate.GetMetadata("RelativePath"));
+                    if (!resolvedSymbolsToPublish.ContainsKey(candidateName))
+                    {
+                        resolvedSymbolsToPublish.Add(candidateName, candidate);
+                    }
+                    else
+                    {
+                        Log.LogMessage(MessageImportance.Low, "Duplicate candidate '{0}' found in ResolvedFilesToPublish", candidate.ItemSpec);
+                    }
+
                     continue;
                 }
 
@@ -550,7 +589,15 @@ namespace Microsoft.NET.Sdk.BlazorWebAssembly
                 // upgraded
                 if (string.Equals(candidate.GetMetadata("AssetType"), "native", StringComparison.Ordinal))
                 {
-                    resolvedNativeAssetToPublish.Add($"{candidate.GetMetadata("FileName")}{extension}", candidate);
+                    var candidateName = $"{candidate.GetMetadata("FileName")}{extension}";
+                    if (!resolvedNativeAssetToPublish.ContainsKey(candidateName))
+                    {
+                        resolvedNativeAssetToPublish.Add(candidateName, candidate);
+                    }
+                    else
+                    {
+                        Log.LogMessage(MessageImportance.Low, "Duplicate candidate '{0}' found in ResolvedFilesToPublish", candidate.ItemSpec);
+                    }
                     continue;
                 }
             }

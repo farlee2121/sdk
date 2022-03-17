@@ -5,12 +5,14 @@
     <StrongNameKeyId>Open</StrongNameKeyId>
     <!-- We need to compare ISymbols in a special way (by name) and roslyn symbol comparers take more heuristics into consideration.-->
     <NoWarn>RS1024;$(NoWarn)</NoWarn>
+    <!-- We pin the code analysis version when not in source build as we need to support running on older
+    SDKs when the OOB package is used. -->
+    <_MicrosoftCodeAnalysisVersion>4.0.1</_MicrosoftCodeAnalysisVersion>
+    <_MicrosoftCodeAnalysisVersion Condition="'$(DotNetBuildFromSource)' == 'true'">$(MicrosoftCodeAnalysisPackageVersion)</_MicrosoftCodeAnalysisVersion>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- We pin the versions of the assets that ship with the SDK in order to be able to run on older SDKs. 
-    Currently we support .NET 6 Preview5 or later. -->
-    <PackageReference Include="Microsoft.CodeAnalysis" Version="4.0.0-1.21304.5" />
+    <PackageReference Include="Microsoft.CodeAnalysis" Version="$(_MicrosoftCodeAnalysisVersion)" />
   </ItemGroup>
 
   <ItemGroup>

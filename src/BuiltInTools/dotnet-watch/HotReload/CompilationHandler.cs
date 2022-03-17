@@ -1,4 +1,4 @@
-// Copyright (c) .NET Foundation. All rights reserved.
+﻿// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 #nullable enable
@@ -154,7 +154,7 @@ namespace Microsoft.DotNet.Watcher.Tools
             if (!rudeEdits.IsDefaultOrEmpty)
             {
                 // Rude edit.
-                _reporter.Output("Unable to apply hot reload because of a rude edit. Rebuilding the app...");
+                _reporter.Output("Unable to apply hot reload because of a rude edit.");
                 foreach (var diagnostic in hotReloadDiagnostics)
                 {
                     _reporter.Verbose(CSharpDiagnosticFormatter.Instance.Format(diagnostic));
@@ -171,7 +171,7 @@ namespace Microsoft.DotNet.Watcher.Tools
             HotReloadEventSource.Log.HotReloadEnd(HotReloadEventSource.StartType.CompilationHandler);
             if (applyState)
             {
-                _reporter.Output($"Hot reload of changes succeeded.");
+                _reporter.Output($"Hot reload of changes succeeded.", emoji: "🔥");
             }
 
             return applyState;

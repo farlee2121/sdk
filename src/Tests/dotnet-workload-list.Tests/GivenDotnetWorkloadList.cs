@@ -14,6 +14,7 @@ using Microsoft.NET.Sdk.WorkloadManifestReader;
 using ManifestReaderTests;
 using System.IO;
 using System.Linq;
+using System;
 
 namespace Microsoft.DotNet.Cli.Workload.List.Tests
 {
@@ -42,7 +43,7 @@ namespace Microsoft.DotNet.Cli.Workload.List.Tests
             command.Execute();
 
             // Expected number of lines for table headers
-            _reporter.Lines.Count.Should().Be(8);
+            _reporter.Lines.Count.Should().Be(6);
         }
 
         [Fact]
@@ -58,23 +59,23 @@ namespace Microsoft.DotNet.Cli.Workload.List.Tests
         }
 
         [Fact]
-        public void GivenNoWorkloadsAreInstalledListIsNotEmpty()
+        public void GivenWorkloadsAreInstalledListIsNotEmpty()
         {
             _reporter.Clear();
             var expectedWorkloads = new List<WorkloadId>() { new WorkloadId("mock-workload-1"), new WorkloadId("mock-workload-2"), new WorkloadId("mock-workload-3") };
             var workloadInstaller = new MockWorkloadRecordRepo(expectedWorkloads);
-            var workloadResolver = WorkloadResolver.CreateForTests(new MockManifestProvider(new[] { _manifestPath }), new string[] { Directory.GetCurrentDirectory() });
+            var workloadResolver = WorkloadResolver.CreateForTests(new MockManifestProvider(new[] { _manifestPath }), Directory.GetCurrentDirectory());
             var command = new WorkloadListCommand(_parseResult, _reporter, workloadInstaller, "6.0.100", workloadResolver: workloadResolver);
             command.Execute();
 
             foreach (var workload in expectedWorkloads)
             {
-                _reporter.Lines.Select(line => line.Trim()).Should().Contain(workload.ToString());
+                _reporter.Lines.Select(line => line.Trim()).Should().Contain($"{workload}             SDK 6.0.100");
             }
         }
 
         [Fact]
-        public void GivenNoWorkloadsAreInstalledMachineReadableListIsNotEmpty()
+        public void GivenWorkloadsAreInstalledMachineReadableListIsNotEmpty()
         {
             _reporter.Clear();
             var expectedWorkloads = new List<WorkloadId>() { new WorkloadId("mock-workload-1"), new WorkloadId("mock-workload-2"), new WorkloadId("mock-workload-3") };
@@ -92,15 +93,15 @@ namespace Microsoft.DotNet.Cli.Workload.List.Tests
             var testDirectory = _testAssetsManager.CreateTestDirectory().Path;
             var expectedWorkloads = new List<WorkloadId>() { new WorkloadId("mock-workload-1"), new WorkloadId("mock-workload-2"), new WorkloadId("mock-workload-3") };
             var workloadInstaller = new MockWorkloadRecordRepo(expectedWorkloads);
-            var workloadResolver = WorkloadResolver.CreateForTests(new MockManifestProvider(new[] { _manifestPath }), new string[] { testDirectory });
+            var workloadResolver = WorkloadResolver.CreateForTests(new MockManifestProvider(new[] { _manifestPath }), testDirectory);
 
             // Lay out fake advertising manifests with pack version update for pack A (in workloads 1 and 3)
-            var userHome = Path.Combine(testDirectory, "userHome");
-            var manifestPath = Path.Combine(userHome, ".dotnet", "sdk-advertising", "6.0.100", "SampleManifest", "WorkloadManifest.json");
+            var userProfileDir = Path.Combine(testDirectory, "user-profile");
+            var manifestPath = Path.Combine(userProfileDir, "sdk-advertising", "6.0.100", "SampleManifest", "WorkloadManifest.json");
             Directory.CreateDirectory(Path.GetDirectoryName(manifestPath));
             File.Copy(Path.Combine(_testAssetsManager.GetAndValidateTestProjectDirectory("SampleManifest"), "MockListSampleUpdated.json"), manifestPath);
 
-            var command = new WorkloadListCommand(_parseResult, _reporter, workloadInstaller, "6.0.100", workloadResolver: workloadResolver, userHome: userHome);
+            var command = new WorkloadListCommand(_parseResult, _reporter, workloadInstaller, "6.0.100", workloadResolver: workloadResolver, userProfileDir: userProfileDir);
             command.Execute();
 
             // Workloads 1 and 3 should have updates

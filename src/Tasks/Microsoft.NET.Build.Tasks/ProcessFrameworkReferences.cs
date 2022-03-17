@@ -10,6 +10,8 @@ using System.Text.RegularExpressions;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
 using Microsoft.DotNet.Cli;
+using Microsoft.DotNet.Configurer;
+using Microsoft.DotNet.Workloads.Workload;
 using Microsoft.NET.Sdk.WorkloadManifestReader;
 using Newtonsoft.Json;
 using NuGet.Frameworks;
@@ -454,10 +456,12 @@ namespace Microsoft.NET.Build.Tasks
         {
             var runtimeGraph = new RuntimeGraphCache(this).GetRuntimeGraph(RuntimeGraphPath);
             var knownFrameworkReferenceRuntimePackRuntimeIdentifiers = selectedRuntimePack.RuntimePackRuntimeIdentifiers.Split(';');
+            var knownFrameworkReferenceRuntimePackExcludedRuntimeIdentifiers = selectedRuntimePack.RuntimePackExcludedRuntimeIdentifiers.Split(';');
 
-            string runtimePackRuntimeIdentifier = NuGetUtils.GetBestMatchingRid(
+            string runtimePackRuntimeIdentifier = NuGetUtils.GetBestMatchingRidWithExclusion(
                     runtimeGraph,
                     runtimeIdentifier,
+                    knownFrameworkReferenceRuntimePackExcludedRuntimeIdentifiers,
                     knownFrameworkReferenceRuntimePackRuntimeIdentifiers,
                     out bool wasInGraph);
 
@@ -634,10 +638,6 @@ namespace Microsoft.NET.Build.Tasks
         {
             IEnumerable<string> GetPackFolders()
             {
-                if (!string.IsNullOrEmpty(TargetingPackRoot))
-                {
-                    yield return TargetingPackRoot;
-                }
                 var packRootEnvironmentVariable = Environment.GetEnvironmentVariable(EnvironmentVariableNames.WORKLOAD_PACK_ROOTS);
                 if (!string.IsNullOrEmpty(packRootEnvironmentVariable))
                 {
@@ -645,6 +645,20 @@ namespace Microsoft.NET.Build.Tasks
                     {
                         yield return Path.Combine(packRoot, "packs");
                     }
+                }
+
+                if (!string.IsNullOrEmpty(NetCoreRoot) && !string.IsNullOrEmpty(NETCoreSdkVersion))
+                {
+                    if (WorkloadFileBasedInstall.IsUserLocal(NetCoreRoot, NETCoreSdkVersion) &&
+                        CliFolderPathCalculatorCore.GetDotnetUserProfileFolderPath() is { } userProfileDir)
+                    {
+                        yield return Path.Combine(userProfileDir, "packs");
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(TargetingPackRoot))
+                {
+                    yield return TargetingPackRoot;
                 }
             }
 
@@ -672,8 +686,9 @@ namespace Microsoft.NET.Build.Tasks
 
             if (_workloadManifestProvider == null)
             {
-                _workloadManifestProvider = new SdkDirectoryWorkloadManifestProvider(NetCoreRoot, NETCoreSdkVersion);
-                _workloadResolver = WorkloadResolver.Create(_workloadManifestProvider, NetCoreRoot, NETCoreSdkVersion);
+                string userProfileDir = CliFolderPathCalculatorCore.GetDotnetUserProfileFolderPath();
+                _workloadManifestProvider = new SdkDirectoryWorkloadManifestProvider(NetCoreRoot, NETCoreSdkVersion, userProfileDir);
+                _workloadResolver = WorkloadResolver.Create(_workloadManifestProvider, NetCoreRoot, NETCoreSdkVersion, userProfileDir);
             }
 
             var packInfo = _workloadResolver.TryGetPackInfo(new WorkloadPackId(packID));
@@ -835,6 +850,8 @@ namespace Microsoft.NET.Build.Tasks
             public string RuntimePackNamePatterns => _item.GetMetadata("RuntimePackNamePatterns");
 
             public string RuntimePackRuntimeIdentifiers => _item.GetMetadata(MetadataKeys.RuntimePackRuntimeIdentifiers);
+
+            public string RuntimePackExcludedRuntimeIdentifiers => _item.GetMetadata(MetadataKeys.RuntimePackExcludedRuntimeIdentifiers);
 
             public string IsTrimmable => _item.GetMetadata(MetadataKeys.IsTrimmable);
 

@@ -37,7 +37,7 @@ namespace Microsoft.DotNet.Cli.Test.Tests
                 .Execute()
                 .Should().Pass();
 
-            var outputDll = Path.Combine(testRoot, "bin", configuration, "netcoreapp3.1", $"{testAppName}.dll");
+            var outputDll = Path.Combine(testRoot, "bin", configuration, ToolsetInfo.CurrentTargetFramework, $"{testAppName}.dll");
 
             // Call vstest
             var result = new DotnetTestCommand(Log)
@@ -71,7 +71,7 @@ namespace Microsoft.DotNet.Cli.Test.Tests
                 .Execute()
                 .Should().Pass();
 
-            var outputDll = Path.Combine(testRoot, "bin", configuration, "netcoreapp3.1", $"{testAppName}.dll");
+            var outputDll = Path.Combine(testRoot, "bin", configuration, ToolsetInfo.CurrentTargetFramework, $"{testAppName}.dll");
 
             // Call dotnet test + dll
             var result = new DotnetTestCommand(Log)
@@ -83,6 +83,35 @@ namespace Microsoft.DotNet.Cli.Test.Tests
             string dotnetRoot = Environment.Is64BitProcess ? "DOTNET_ROOT" : "DOTNET_ROOT(x86)";
             result.StartInfo.EnvironmentVariables.ContainsKey(dotnetRoot).Should().BeTrue($"because {dotnetRoot} should be set");
             result.StartInfo.EnvironmentVariables[dotnetRoot].Should().Be(Path.GetDirectoryName(dotnet));
+        }
+
+        [Fact]
+        public void TestsFromAGivenContainerAndArchSwitchShouldFlowToVsTestConsole()
+        {
+            var testAppName = "VSTestCore";
+            var testAsset = _testAssetsManager.CopyTestAsset(testAppName)
+                .WithSource()
+                .WithVersionVariables();
+
+            var testRoot = testAsset.Path;
+
+            var configuration = Environment.GetEnvironmentVariable("CONFIGURATION") ?? "Debug";
+
+            new BuildCommand(testAsset)
+                .Execute()
+                .Should().Pass();
+
+            var outputDll = Path.Combine(testRoot, "bin", configuration, ToolsetInfo.CurrentTargetFramework, $"{testAppName}.dll");
+
+            // Call vstest
+            var result = new DotnetTestCommand(Log)
+                .Execute(outputDll, "--arch", "wrongArchitecture");
+            if (!TestContext.IsLocalized())
+            {
+                result.StdErr.Should().StartWith("Invalid platform type: wrongArchitecture. Valid platform types are ");
+            }
+
+            result.ExitCode.Should().Be(1);
         }
     }
 }

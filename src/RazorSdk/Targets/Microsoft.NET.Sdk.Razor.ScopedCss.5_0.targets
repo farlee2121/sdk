@@ -120,7 +120,7 @@ Integration with static web assets:
   NOTE: This target is called as part of an incremental build scenario in VS. Do not perform any work
   outside of calculating RazorComponent items in this target.
   -->
-  <DiscoverDefaultScopedCssItems Condition="'$(EnableDefaultScopedCssItems)' == 'true'" Content="@(None);@(Content)">
+  <DiscoverDefaultScopedCssItems Condition="'$(EnableDefaultScopedCssItems)' == 'true'" Content="@(None);@(Content)" SupportsScopedCshtmlCss="false">
     <Output TaskParameter="DiscoveredScopedCssInputs" ItemName="_DiscoveredScopedCssInputs" />
   </DiscoverDefaultScopedCssItems>
 
@@ -292,6 +292,12 @@ Integration with static web assets:
 
   </ItemGroup>
 
+</Target>
+
+<Target Name="_RemoveApplicationBundleForPack" BeforeTargets="_CreateStaticWebAssetsCustomPropsCacheFile" Condition="'$(DisableScopedCssBundling)' != 'true'">
+  <ItemGroup>
+    <StaticWebAsset Remove="@(_AppBundleStaticWebAsset)" />
+  </ItemGroup>
 </Target>
 
 <!-- This target runs as part of ResolveStaticWebAssetInputs and collects all the generated scoped css files. When bundling is enabled
